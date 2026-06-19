@@ -1170,8 +1170,26 @@ class DynamicIsland(QWidget):
         return w
 
     def update_claude_state(self, ev: dict):
+        prev_status = self.claude_state.status
         self.claude_state.update_from_event(ev)
         self._refresh_claude_panel_labels()
+        self._surface_claude_activity(prev_status)
+
+    def _surface_claude_activity(self, prev_status):
+        cur = self.claude_state.status
+        if cur == prev_status:
+            return
+        # Make Claude the selected carousel panel so a hover shows it — but don't
+        # yank the view if the user is actively browsing another panel.
+        if self.current_state != "Hover" and "claude" in self.features:
+            self.current_feature_index = self.features.index("claude")
+        # Pop a banner only for headline transitions (avoids a banner per tool call).
+        if cur == "waiting_for_input":
+            self.show_notification("Claude Code", "", "Needs your input")
+        elif cur == "ended":
+            self.show_notification("Claude Code", "", "Session ended")
+        elif cur in ("processing", "running_tool", "compacting") and prev_status in ("idle", "ended", ""):
+            self.show_notification("Claude Code", "", "Working...")
 
     def _refresh_claude_panel_labels(self):
         s = self.claude_state
@@ -1517,6 +1535,13 @@ class DynamicIsland(QWidget):
         super().closeEvent(event)
 
 if __name__ == "__main__":
+    # Single-instance guard. The hook auto-launches Notchi on every Claude Code
+    # event; without this, each event would spawn a new window. A named mutex is
+    # released automatically by Windows when the owning process exits/crashes.
+    _singleton_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "Global\\NotchiDynamicIsland")
+    if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        sys.exit(0)
+
     app = QApplication(sys.argv); island = DynamicIsland(); island.show()
     QTimer.singleShot(100, lambda: (island.update_island_geometry(island.get_island_rect(), island.get_current_radius()), island.content_container.move(0, 0), island.update()))
     sys.exit(app.exec())
