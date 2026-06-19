@@ -1233,7 +1233,8 @@ class DynamicIsland(QWidget):
             feature = self.features[self.current_feature_index]
             if feature == "claude":
                 self._set_compact_claude(True)
-                self.status_text.setText(self.claude_state.status_label)
+                now = datetime.datetime.now(); ts = now.strftime("%I:%M %p").lstrip("0")
+                self.status_text.setText(f"{now.strftime('%a')}, {ts}")
             elif feature == "media" and self.media_state in ("Playing", "Paused"):
                 self._set_compact_claude(False)
                 if self.showing_lyrics and self.media_lyric_text:
