@@ -617,7 +617,10 @@ class DynamicIsland(QWidget):
         self.status_icon = QLabel(); self.status_icon.setObjectName("IconLabel"); self.status_icon.setFixedSize(22, 22)
         self.status_icon.setPixmap(qta.icon('mdi.circle', color=self.accent_color).pixmap(20, 20))
         self.status_text = QLabel(""); self.status_text.setObjectName("TitleLabel")
-        self.header_layout.addWidget(self.status_icon); self.header_layout.addWidget(self.status_text)
+        # Compact mascot: shown in the collapsed pill (in place of status_icon) when
+        # Claude Code is the active feature, so the sprite is visible without hovering.
+        self.claude_mini_sprite = SpriteWidget(size=24); self.claude_mini_sprite.hide()
+        self.header_layout.addWidget(self.status_icon); self.header_layout.addWidget(self.claude_mini_sprite); self.header_layout.addWidget(self.status_text)
         self.media_controls = QWidget(); self.media_controls_layout = QHBoxLayout(self.media_controls); self.media_controls_layout.setContentsMargins(0, 0, 0, 0); self.media_controls_layout.setSpacing(2)
         self.btn_prev = QPushButton(icon=qta.icon('mdi.skip-previous', color='white')); self.btn_play = QPushButton(icon=qta.icon('mdi.play', color='white')); self.btn_next = QPushButton(icon=qta.icon('mdi.skip-next', color='white'))
         for b in [self.btn_prev, self.btn_play, self.btn_next]: b.setObjectName("MediaButton")
@@ -1195,6 +1198,10 @@ class DynamicIsland(QWidget):
         self.claude_state.update_from_event(ev)
         self._refresh_claude_panel_labels()
         self._surface_claude_activity(prev_status)
+        # Refresh the collapsed pill immediately if Claude is the active feature
+        # (otherwise the compact mascot would lag until the next 1s tick).
+        if self.current_state == "Idle":
+            self.update_content()
 
     def _surface_claude_activity(self, prev_status):
         cur = self.claude_state.status
@@ -1224,18 +1231,32 @@ class DynamicIsland(QWidget):
     def update_content(self):
         if self.current_state == "Idle":
             feature = self.features[self.current_feature_index]
-            if feature == "media" and self.media_state in ("Playing", "Paused"):
+            if feature == "claude":
+                self._set_compact_claude(True)
+                self.status_text.setText(self.claude_state.status_label)
+            elif feature == "media" and self.media_state in ("Playing", "Paused"):
+                self._set_compact_claude(False)
                 if self.showing_lyrics and self.media_lyric_text:
                     self.status_text.setText(self.media_lyric_text)
                 else:
                     dt = self.media_title; self.status_text.setText(dt[:22] + "..." if len(dt) > 25 else dt)
                 self.status_icon.setPixmap(qta.icon('mdi.music', color='white').pixmap(18, 18))
             else:
+                self._set_compact_claude(False)
                 now = datetime.datetime.now(); ts = now.strftime("%I:%M %p").lstrip("0"); self.status_text.setText(f"{now.strftime('%a')}, {ts}")
                 self.status_icon.setPixmap(qta.icon('mdi.circle', color=self.accent_color).pixmap(18, 18))
         if hasattr(self, 'claude_meta_label'):
             self._refresh_claude_panel_labels()
         self.update()
+
+    def _set_compact_claude(self, active: bool):
+        """Toggle the compact-pill mascot (shown in place of the status icon)."""
+        if not hasattr(self, 'claude_mini_sprite'):
+            return
+        self.status_icon.setVisible(not active)
+        self.claude_mini_sprite.setVisible(active)
+        if active:
+            self.claude_mini_sprite.set_status(self.claude_state.status)
 
     def update_perf(self, data):
         cpu, ram, disk = data["cpu"], data["ram"], data["disk"]
@@ -1281,10 +1302,12 @@ class DynamicIsland(QWidget):
             self.perf_panel.hide(); self.perf_widget.hide(); self.media_controls.hide(); self.weather_panel.hide(); self.calendar_panel.hide(); self.month_panel.hide(); self.basics_panel.hide(); self.claude_panel.hide()
             self.header_widget.show(); self.update_content(); return
         if self.current_state == "Notify":
+            self._set_compact_claude(False)
             self.perf_panel.hide(); self.perf_widget.hide(); self.media_controls.hide(); self.weather_panel.hide(); self.calendar_panel.hide(); self.month_panel.hide(); self.basics_panel.hide(); self.claude_panel.hide(); self.header_widget.show()
             self.status_icon.setPixmap(qta.icon('mdi.lightning-bolt' if "Lock" in self.event_title else 'mdi.email', color='white').pixmap(18, 18))
             dt = f"{self.event_title} - {self.event_text}"; self.status_text.setText(dt[:45] + "..." if len(dt) > 48 else dt)
             return
+        self._set_compact_claude(False)
         feature = self.features[self.current_feature_index]
         self.header_widget.show() if feature == "media" else self.header_widget.hide()
         self.perf_panel.setVisible(feature == "perf")
