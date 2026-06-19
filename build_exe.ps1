@@ -17,6 +17,7 @@ Write-Host "--- Starting Build Process for $AppName ---" -ForegroundColor Cyan
     --collect-all winsdk `
     --collect-all qtawesome `
     --hidden-import winsdk.windows.ui.notifications.management `
+    --add-data "assets;assets" `
     $MainScript
 
 Write-Host "--- Build Complete! Check the 'dist' folder ---" -ForegroundColor Green

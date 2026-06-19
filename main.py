@@ -1,7 +1,18 @@
 import sys
+import ctypes
+
+# Single-instance guard — runs BEFORE the heavy imports below. The WSL hook
+# auto-launches Notchi on every Claude Code event, so duplicates spawn often;
+# bailing out here (instead of at __main__) means an extra instance dies in
+# milliseconds rather than after a full PyQt import cycle, eliminating the
+# brief window where two windows overlap. Windows frees the mutex on exit.
+if __name__ == "__main__":
+    _singleton_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "Global\\NotchiDynamicIsland")
+    if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        sys.exit(0)
+
 import psutil
 import winreg
-import ctypes
 import datetime
 import math
 import qtawesome as qta
@@ -22,6 +33,7 @@ from event_monitor import KeyLockMonitor
 from notification_monitor import NotificationMonitor
 from weather_monitor import WeatherMonitor
 from claude_monitor import ClaudeMonitor
+from sprite_widget import SpriteWidget
 from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
                              QLabel, QMenu, QPushButton, QGraphicsOpacityEffect, 
                              QGridLayout, QFrame, QProgressBar, QInputDialog,
@@ -1156,17 +1168,26 @@ class DynamicIsland(QWidget):
         l.addWidget(btn_l); l.addWidget(lbl); l.addWidget(btn_r); return w
 
     def create_claude_panel(self):
-        w = QWidget(); l = QVBoxLayout(w); l.setContentsMargins(25, 12, 25, 16); l.setSpacing(6)
+        w = QWidget(); l = QVBoxLayout(w); l.setContentsMargins(22, 10, 22, 14); l.setSpacing(4)
         header = QHBoxLayout(); header.setSpacing(8)
         self.claude_dot = QFrame(); self.claude_dot.setFixedSize(10, 10)
         self.claude_dot.setStyleSheet("background-color: #555555; border-radius: 5px;")
         title = QLabel("Claude Code"); title.setStyleSheet("font-weight: bold; font-size: 14px; color: white;")
         header.addWidget(self.claude_dot); header.addWidget(title); header.addStretch()
         l.addLayout(header)
+
+        body = QHBoxLayout(); body.setSpacing(14); body.setContentsMargins(0, 2, 0, 0)
+        self.claude_sprite = SpriteWidget(size=56)
+        body.addWidget(self.claude_sprite)
+        text_col = QVBoxLayout(); text_col.setSpacing(2)
+        text_col.addStretch()
         self.claude_status_label = QLabel("Idle"); self.claude_status_label.setStyleSheet("font-size: 22px; font-weight: 700; color: white;")
-        l.addWidget(self.claude_status_label)
+        text_col.addWidget(self.claude_status_label)
         self.claude_meta_label = QLabel(""); self.claude_meta_label.setStyleSheet("font-size: 10px; color: #777;")
-        l.addWidget(self.claude_meta_label)
+        text_col.addWidget(self.claude_meta_label)
+        text_col.addStretch()
+        body.addLayout(text_col); body.addStretch()
+        l.addLayout(body)
         return w
 
     def update_claude_state(self, ev: dict):
@@ -1197,6 +1218,8 @@ class DynamicIsland(QWidget):
         self.claude_status_label.setText(s.status_label)
         cwd_short = s.cwd.rstrip("/").split("/")[-1] if s.cwd else ""
         self.claude_meta_label.setText(f"{s.elapsed_str}  ·  {cwd_short}" if cwd_short else s.elapsed_str)
+        if hasattr(self, 'claude_sprite'):
+            self.claude_sprite.set_status(s.status)
 
     def update_content(self):
         if self.current_state == "Idle":
@@ -1535,13 +1558,7 @@ class DynamicIsland(QWidget):
         super().closeEvent(event)
 
 if __name__ == "__main__":
-    # Single-instance guard. The hook auto-launches Notchi on every Claude Code
-    # event; without this, each event would spawn a new window. A named mutex is
-    # released automatically by Windows when the owning process exits/crashes.
-    _singleton_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "Global\\NotchiDynamicIsland")
-    if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-        sys.exit(0)
-
+    # Singleton guard already ran at the top of this module (before imports).
     app = QApplication(sys.argv); island = DynamicIsland(); island.show()
     QTimer.singleShot(100, lambda: (island.update_island_geometry(island.get_island_rect(), island.get_current_radius()), island.content_container.move(0, 0), island.update()))
     sys.exit(app.exec())
