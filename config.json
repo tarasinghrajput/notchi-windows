@@ -5,6 +5,6 @@
     "claude_port": 8765,
     "tasks": [],
     "compatibility_mode": true,
-    "island_style": "Default",
-    "animation_style": "Fluid Blobs"
+    "island_style": "Notch Nook",
+    "animation_style": "Neon Border"
 }

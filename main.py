@@ -296,7 +296,8 @@ class DynamicIsland(QWidget):
         self.load_settings()
         self.setup_monitors()
         self.init_ui()
-        self.setup_autostart()
+        self._active_sessions: set = set()
+        self.remove_autostart()
         
         self.master_timer = QTimer(self); self.master_timer.timeout.connect(self.update_content); self.master_timer.start(1000)
         self.anim_timer = QTimer(self); self.anim_timer.timeout.connect(self.update_animation); self.anim_timer.start(16)
@@ -597,13 +598,14 @@ class DynamicIsland(QWidget):
     def set_charging_phase(self, value): self._charging_phase = value; self.update()
     charging_phase = pyqtProperty(float, get_charging_phase, set_charging_phase)
 
-    def setup_autostart(self):
+    def remove_autostart(self):
         try:
-            app_path = sys.executable if getattr(sys, 'frozen', False) else f'"{sys.executable}" "{sys.argv[0]}"'
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_SET_VALUE)
-            winreg.SetValueEx(key, "DynamicIsland", 0, winreg.REG_SZ, app_path)
+            winreg.DeleteValue(key, "DynamicIsland")
             winreg.CloseKey(key)
-        except Exception as e: print("Autostart error:", e)
+        except FileNotFoundError:
+            pass
+        except Exception as e: print("remove_autostart error:", e)
 
     def init_ui(self):
         self.main_layout = QVBoxLayout(self); self.main_layout.setContentsMargins(0, 0, 0, 0); self.main_layout.setSpacing(0)
@@ -1194,6 +1196,18 @@ class DynamicIsland(QWidget):
         return w
 
     def update_claude_state(self, ev: dict):
+        event = ev.get("event", "")
+        sid = ev.get("session_id", "")
+        if event == "SessionStart" and sid:
+            self._active_sessions.add(sid)
+        elif event == "SessionEnd" and sid:
+            self._active_sessions.discard(sid)
+            if not self._active_sessions:
+                self.close()
+                return
+            else:
+                return  # other sessions still active — don't update display
+
         prev_status = self.claude_state.status
         self.claude_state.update_from_event(ev)
         self._refresh_claude_panel_labels()
@@ -1580,6 +1594,12 @@ class DynamicIsland(QWidget):
         self.weather_monitor.stop()
         self.claude_monitor.stop()
         super().closeEvent(event)
+        # This is a Qt.Tool window, which doesn't count toward
+        # quitOnLastWindowClosed — so closing it only hides the window and the
+        # process lingers, holding the singleton mutex and blocking future
+        # hook-driven launches. Quit explicitly so the process exits and frees
+        # the mutex.
+        QApplication.quit()
 
 if __name__ == "__main__":
     # Singleton guard already ran at the top of this module (before imports).
