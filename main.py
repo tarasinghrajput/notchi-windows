@@ -217,7 +217,11 @@ class DynamicIsland(QWidget):
         
         self.is_dialog_open = False
         self.is_editing_tasks = False
-        
+
+        # Task timer: track time spent on a single task
+        self.active_timer_task = None   # name of task currently being timed
+        self.timer_start_ts = None      # _time.time() when timer started
+
         self._weather_bg_opacity = 0.0
         self.weather_bg_anim = QPropertyAnimation(self, b"weather_bg_opacity")
         self.weather_bg_anim.setDuration(1200)
@@ -975,8 +979,9 @@ class DynamicIsland(QWidget):
         h = QHBoxLayout(); t = QLabel("Next Up"); t.setStyleSheet("font-weight: bold; font-size: 15px;")
         self.ev_count_label = QLabel("0 tasks"); self.ev_count_label.setStyleSheet("color: #888; font-size: 11px;")
         eb = self.create_action_button("calendar"); eb.setIcon(qta.icon("mdi.pencil", color="white")); eb.clicked.connect(self.open_task_editor)
+        self.calendar_timer_label = QLabel(""); self.calendar_timer_label.setStyleSheet("color: #FF8C00; font-size: 11px; font-weight: 600;"); self.calendar_timer_label.hide()
         # Move pencil to the left to avoid overflow
-        h.addWidget(eb); h.addSpacing(5); h.addWidget(t); h.addWidget(self.ev_count_label); h.addStretch()
+        h.addWidget(eb); h.addSpacing(5); h.addWidget(t); h.addWidget(self.ev_count_label); h.addStretch(); h.addWidget(self.calendar_timer_label)
         view_layout.addLayout(h)
         
         self.tasks_container_widget = QWidget()
@@ -1068,6 +1073,22 @@ class DynamicIsland(QWidget):
         self.recenter_window()
         self.execute_liquid_transition()
 
+    def _fmt_elapsed(self, seconds):
+        seconds = int(seconds)
+        h, rem = divmod(seconds, 3600)
+        m, s = divmod(rem, 60)
+        return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+    def toggle_task_timer(self, task_name):
+        if self.active_timer_task == task_name:
+            self.active_timer_task = None
+            self.timer_start_ts = None
+        else:
+            self.active_timer_task = task_name
+            self.timer_start_ts = _time.time()
+        self.refresh_calendar_panel()
+        self.update_content()
+
     def refresh_calendar_panel(self):
         # Deep clean existing tasks to prevent overlapping ghost widgets
         for child in self.tasks_container_widget.findChildren(QWidget):
@@ -1103,7 +1124,12 @@ class DynamicIsland(QWidget):
             c = QLabel(t.get('category', 'Task')); c.setStyleSheet("font-size: 10px; color: #888; padding: 0px;")
             det.addWidget(n); det.addWidget(c)
             tm = QLabel(t.get('time', '')); tm.setStyleSheet("font-size: 11px; font-weight: 500;")
-            row.addWidget(bar); row.addLayout(det); row.addStretch(); row.addWidget(tm)
+            is_active = (self.active_timer_task == t['name'])
+            tbtn = QPushButton(); tbtn.setFixedSize(22, 22); tbtn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            tbtn.setStyleSheet("QPushButton { background: transparent; border: none; } QPushButton:hover { background: rgba(255,255,255,0.12); border-radius: 11px; }")
+            tbtn.setIcon(qta.icon('mdi.stop' if is_active else 'mdi.play', color='#FF8C00' if is_active else '#4CAF50'))
+            tbtn.clicked.connect(lambda _, name=t['name']: self.toggle_task_timer(name))
+            row.addWidget(bar); row.addLayout(det); row.addStretch(); row.addWidget(tm); row.addSpacing(6); row.addWidget(tbtn)
             self.tasks_container_layout.addLayout(row)
             
         # Calculate dynamic height for View Mode
@@ -1243,6 +1269,23 @@ class DynamicIsland(QWidget):
             self.claude_sprite.set_status(s.status)
 
     def update_content(self):
+        # Active task timer takes over the calendar header + compact pill
+        if hasattr(self, 'calendar_timer_label'):
+            if self.active_timer_task and self.timer_start_ts:
+                elapsed = self._fmt_elapsed(_time.time() - self.timer_start_ts)
+                self.calendar_timer_label.setText(f"⏱  {self.active_timer_task[:18]}  {elapsed}")
+                self.calendar_timer_label.show()
+            else:
+                self.calendar_timer_label.hide()
+        if self.current_state == "Idle" and self.active_timer_task and self.timer_start_ts:
+            self._set_compact_claude(False)
+            elapsed = self._fmt_elapsed(_time.time() - self.timer_start_ts)
+            self.status_text.setText(f"{self.active_timer_task[:12]}  {elapsed}")
+            self.status_icon.setPixmap(qta.icon('mdi.timer-outline', color='#FF8C00').pixmap(18, 18))
+            if hasattr(self, 'claude_meta_label'):
+                self._refresh_claude_panel_labels()
+            self.update()
+            return
         if self.current_state == "Idle":
             feature = self.features[self.current_feature_index]
             if feature == "claude":
